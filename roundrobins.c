@@ -4,20 +4,21 @@
 #include <signal.h>
 #include <sys/wait.h>
 
-// --- FUNGSI DOWORK ---
+// --- FUNGSI DOWORK (Anak) ---
 void doWork(int id, int burst_time) {
     int sisa = burst_time;
     while (sisa > 0) {
-        // Child hanya akan berjalan jika menerima SIGCONT
-        printf("  [P%d] Sedang bekerja... (Sisa: %ds)\n", id, sisa);
+        // Menunggu sinyal untuk lanjut
+        printf("  [P%d] Bekerja... (Sisa: %ds)\n", id, sisa);
+        fflush(stdout); // Pastikan teks langsung muncul
         sleep(1); 
         sisa--;
     }
-    printf("  [P%d] Selesai mengerjakan semua tugas.\n", id);
+    printf("  [P%d] SELESAI.\n", id);
     exit(0);
 }
 
-// --- FUNGSI SCHEDULER_HANDLER ---
+// --- FUNGSI SCHEDULER_HANDLER (Induk) ---
 void scheduler_handler(int n, pid_t pids[], int burst_times[], int quantum) {
     int sisa_waktu[10];
     int selesai = 0;
@@ -28,23 +29,25 @@ void scheduler_handler(int n, pid_t pids[], int burst_times[], int quantum) {
     while (selesai < n) {
         for (int i = 0; i < n; i++) {
             if (sisa_waktu[i] > 0) {
-                printf("\n>>> Giliran P%d (Sisa Burst: %ds)\n", i + 1, sisa_waktu[i]);
+                printf("\n>>> Giliran P%d (Sisa: %ds)\n", i + 1, sisa_waktu[i]);
                 
-                kill(pids[i], SIGCONT); // Lanjutkan Child
+                // Bangunkan proses anak
+                kill(pids[i], SIGCONT);
 
-                int durasi_detik = (sisa_waktu[i] > quantum) ? quantum : sisa_waktu[i];
+                int durasi = (sisa_waktu[i] > quantum) ? quantum : sisa_waktu[i];
                 
-                // Beri waktu Child bekerja tepat sesuai durasi_detik
-                sleep(durasi_detik); 
+                // Menunggu anak bekerja selama durasi quantum
+                sleep(durasi); 
                 
-                sisa_waktu[i] -= durasi_detik;
+                sisa_waktu[i] -= durasi;
 
                 if (sisa_waktu[i] > 0) {
-                    kill(pids[i], SIGSTOP); // Hentikan tepat setelah durasi habis
-                    printf(">>> P%d di-jeda (Waktu habis).\n", i + 1);
+                    // Berhentikan (pause) jika waktu habis
+                    kill(pids[i], SIGSTOP);
+                    printf(">>> P%d di-jeda.\n", i + 1);
                 } else {
-                    int status;
-                    waitpid(pids[i], &status, 0); // Tunggu Child exit bersih
+                    // Pastikan proses benar-benar selesai
+                    waitpid(pids[i], NULL, 0);
                     selesai++;
                 }
             }
@@ -57,7 +60,7 @@ void scheduler_handler(int n, pid_t pids[], int burst_times[], int quantum) {
 int main() {
     int n, quantum = 5;
     printf("Masukkan jumlah proses: ");
-    scanf("%d", &n);
+    if (scanf("%d", &n) != 1) return 1;
 
     int burst_times[10];
     pid_t pids[10];
@@ -70,11 +73,16 @@ int main() {
     for (int i = 0; i < n; i++) {
         pids[i] = fork();
         if (pids[i] == 0) {
-            raise(SIGSTOP); // Child langsung pause setelah lahir
+            // Anak langsung berhenti begitu lahir
+            raise(SIGSTOP); 
             doWork(i + 1, burst_times[i]);
         }
     }
 
+    // Beri jeda kecil agar semua fork selesai dengan sempurna sebelum diatur scheduler
+    usleep(100000); 
+
     scheduler_handler(n, pids, burst_times, quantum);
+
     return 0;
 }
